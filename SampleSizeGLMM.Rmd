@@ -1,0 +1,123 @@
+---
+title: "SampleSizeGLMM"
+author: "Yuan Raymond SHANG"
+date: "2023-08-02"
+output: html_document
+---
+
+This markdown file helps to determine a reasonable sample size in a generalized linear mixed model.
+
+Assuming we have some measurement y, which might be affected by 4 factors g1,g2,g3,and g4. We also want to see how y might be affected by the interactions between these factors.
+
+In g1, there are 3 levels: 'y','o','m'
+
+In g2, there are 2 levels: 'm','f'
+
+In g3, there are 2 levels: 'a','b'
+
+In g4, there are 3 levels: 'a3','a4','a34'
+
+Our final goal is to estimate a reasonable SAMPLE SIZE, given alpha=0.95, beta=0.8, and some level of signals, randomness levels.
+
+Of course, you could change Covariance Matrix part if your design matrix is different.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+```{r}
+library(simr)
+simrOptions(progress=FALSE)
+```
+
+## Covariance Matrix
+If the design is different, change the groups here to get the correct covars matrix here.
+
+We are assuming we have 10 samples for each category, and this could be changed later.
+
+```{r}
+#Build covariance matrix, assuming 10 samples for each category
+subj <- factor(1:10)
+g1 <- c('y','o','m') #age
+g2<-c('m','f') #Sex
+g3 <- c('a','b') #mtDNA
+g4 <- c("a3","a4","a34") #apoe
+
+l_subj <- length(subj)
+l_g1 <- length(g1)
+l_g2 <- length(g2)
+l_g3 <- length(g3)
+l_g4 <- length(g4)
+
+groups <- l_g1*l_g2*l_g3*l_g4
+subj_full <- rep(subj, groups)
+
+g1_full <- rep(rep(g1, each=l_subj), l_g2*l_g3*l_g4)
+g2_full <- rep(rep(g2,each=l_subj*l_g1), l_g3*l_g4)
+g3_full <- rep(rep(g3, each=l_subj*l_g1*l_g2), l_g4)
+g4_full <- rep(g4,each=l_subj*l_g1*l_g2*l_g3)
+
+covars <- data.frame(id=subj_full, g1=factor(g1_full), g2=factor(g2_full), g3=factor(g3_full),g4=factor(g4_full))
+
+#total_groups <- 
+covars
+```
+
+## Build GLMM model
+Here, we need to define a GLMM model, set some basic values based on the understandings of the measurement:y.
+
+In this demo example, assuming y has a basemean=5, the residual variance is 40% of the the basemean, thus res=2. And we are assuming the averageEffect between groups is 0.25. Note that this effect could be changed into a list, specifying different effect for different factor combinations. To make it simple here, I just assuming the effect are the same between any group and the baseline. The ultimate goal is to get the fixed array.
+
+We also assume 0.5 randomness for each participants
+```{r}
+#Build GLMM model
+#Base mean value
+basemean=5
+## residual variance, assuming the variance is around 40% of basemean
+res <- 2
+## Average Diff between groups, assuming 5% difference to the mean
+averageEffect=0.25
+#Effect size: This is not used, just for reference
+Effectsize <- averageEffect/res
+
+#
+## Intercept and slopes for each factor in the GLMM model, assuming Full Model here
+## Need to change based on your model if not Full Model.
+fixed <- c(basemean, rep(averageEffect,(groups-1)))
+
+## Random intercepts for participants, or participants in certain groups
+randomIntercept=TRUE
+### Set Random intercepts to be 10% of basemean
+rand <- list(0.5)
+
+
+if(randomIntercept){
+  #http://www.bristol.ac.uk/cmm/learning/videos/random-intercepts.html
+  model <- makeLmer(y ~ g1*g2*g3*g4 + (1|id), fixef=fixed, VarCorr=rand, sigma=res, data=covars)#+ (1|class/id)
+  #for GLMM
+  #makeGlmer(z ~ x + (x|g), family="poisson", fixef=b, VarCorr=V2, data=X) 
+}else{
+  model <- makeLmer(y ~ g1*g2*g3*g4 + (1|id), fixef=fixed, VarCorr=rand, sigma=res, data=covars)#+ (1|class/id)
+}
+
+#model <- makeLmer(y ~ g1*g2*g3*g4, fixef=fixed, VarCorr=rand, sigma=res, data=covars)#+ (1|class/id)
+
+model
+```
+
+## Simulation to test
+```{r}
+#First simulate to get a rough idea
+sim_treat <- powerSim(model, nsim=100, test = fcompare(y~g1))
+
+sim_treat
+```
+
+## Samplesize estimation from simulation
+```{r}
+model_ext_subj <- extend(model, within="g1+g2+g3+g4", n=8)
+p_curve_treat <- powerCurve(model_ext_subj, test=fcompare(y~g4), within="g1+g2+g3+g4", breaks=c(3,4,5,8))
+plot(p_curve_treat)
+```
+
